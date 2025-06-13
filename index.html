@@ -1,0 +1,2071 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>創意3D畫廊</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.0/marked.min.js"></script> 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#165DFF',
+                        secondary: '#FF7D00',
+                        dark: '#1E293B',
+                        light: '#F8FAFC'
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'sans-serif'],
+                    },
+                } // 修正：移除這裡多餘的反斜線
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            /* perspective 和 preserve-3d 不再用於 Three.js 場景 */
+            .backface-hidden {
+                backface-visibility: hidden;
+            }
+            .transition-transform-slow {
+                transition: transform 1s ease-out;
+            }
+            .category-active {
+                background-color: rgba(22, 93, 255, 0.9);
+                color: white;
+                transform: translateY(-5px);
+                box-shadow: 0 5px 15px rgba(22, 93, 255, 0.3);
+            }
+        }
+    </style>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            min-height: 100vh;
+            color: #F8FAFC;
+        }
+        
+        .gallery-container {
+            position: relative;
+            width: 100%;
+            height: 500px; /* 調整以容納 Three.js 場景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* 隱藏 Three.js 溢出部分 */
+        }
+        
+        #three-container {
+            width: 100%;
+            height: 100%;
+            display: block; /* 確保 canvas 佔滿容器 */
+            cursor: grab; /* 拖曳時改變鼠標樣式 */
+        }
+
+        .nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(22, 93, 255, 0.8);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 10;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(22, 93, 255, 1);
+            transform: translateY(-50%) scale(1.1);
+            box-shadow: 0 0 15px rgba(22, 93, 255, 0.7);
+        }
+        
+        .nav-btn.prev {
+            left: 10%;
+        }
+        
+        .nav-btn.next {
+            right: 10%;
+        }
+        
+        .gallery-indicators {
+            display: flex;
+            justify-content: center;
+            margin-top: 30px;
+            gap: 10px;
+        }
+        
+        .indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgba(248, 250, 252, 0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .indicator.active {
+            background: rgba(22, 93, 255, 1);
+            transform: scale(1.2);
+            box-shadow: 0 0 10px rgba(22, 93, 255, 0.7);
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.8s ease forwards;
+        }
+        
+        .gallery-info {
+            max-width: 800px;
+            margin: 30px auto;
+            text-align: center;
+            padding: 0 20px;
+        }
+        
+        .gallery-title {
+            font-size: clamp(1.5rem, 3vw, 2.5rem);
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #F8FAFC;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        .gallery-desc {
+            font-size: clamp(1rem, 1.5vw, 1.2rem);
+            color: rgba(248, 250, 252, 0.8);
+            line-height: 1.6;
+        }
+        
+        /* 分類導航樣式 */
+        .category-nav {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+            margin: 30px auto;
+            max-width: 900px;
+            padding: 0 20px;
+        }
+        
+        .category-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(248, 250, 252, 0.9);
+            border: none;
+            border-radius: 25px;
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .category-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .category-btn i {
+            font-size: 1.2rem;
+        }
+        
+        /* 加載動畫樣式 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(30, 41, 59, 0.9);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .loading-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .loader {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(22, 93, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: rgba(22, 93, 255, 1);
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 模態框樣式 */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: flex-start; /* 將內容靠左對齊 */
+            align-items: flex-start; /* 將內容靠頂部對齊 */
+            z-index: 30;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-content {
+            background: #1E293B;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 380px; /* 設置為較窄的寬度以實現直式佈局 */
+            width: calc(100% - 10vw); /* 響應式調整寬度，考慮左右邊距 */
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+            position: relative; /* 保持相對定位 */
+            margin-top: 50px; /* 從頂部向下推 */
+            margin-left: 5vw; /* 從左側推開 */
+            transform: translateY(20px); /* 初始動畫狀態 */
+            transition: transform 0.3s ease, opacity 0.3s ease; /* 過渡效果 */
+            opacity: 0; /* 初始動畫狀態 */
+            text-align: left; /* 內容文字靠左對齊 */
+        }
+
+        .modal.active .modal-content {
+            transform: translateY(0); /* 動畫最終狀態 */
+            opacity: 1; /* 動畫最終狀態 */
+        }
+
+        .modal-close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: #F8FAFC;
+            cursor: pointer;
+            transition: color 0.3s ease;
+        }
+
+        .modal-close-btn:hover {
+            color: #FF7D00;
+        }
+
+        .modal-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: #F8FAFC;
+            text-align: left; /* 標題文字靠左對齊 */
+        }
+
+        .modal-story {
+            font-size: 1rem;
+            color: rgba(248, 250, 252, 0.8);
+            line-height: 1.7;
+            white-space: pre-wrap; /* 保留換行符號 */
+            max-height: 300px; /* 限制高度以顯示長故事 */
+            overflow-y: auto; /* 如果內容超出高度，則添加滾動條 */
+        }
+        
+        /* API 金鑰輸入區塊樣式 */
+        .api-key-section {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .api-key-section input {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border-radius: 5px;
+            border: 1px solid rgba(248, 250, 252, 0.3);
+            background: rgba(0, 0, 0, 0.2);
+            color: #F8FAFC;
+            font-size: 0.9rem;
+            max-width: 400px;
+        }
+
+        .api-key-section input::placeholder {
+            color: rgba(248, 250, 252, 0.6);
+        }
+
+        .api-key-section button {
+            padding: 10px 20px;
+            border-radius: 5px;
+            background: #165DFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .api-key-section button:hover {
+            background: #0D4EDF;
+        }
+
+        .api-key-section #clearApiKeyBtn { /* Added style for the new button */
+            background: #FF7D00;
+        }
+
+        .api-key-section #clearApiKeyBtn:hover { /* Added hover style for the new button */
+            background: #E06C00;
+        }
+
+        /* 新增的模態框分頁樣式 */
+        .modal-section {
+            display: none; /* 預設隱藏 */
+        }
+
+        .modal-section.active {
+            display: block; /* 啟用時顯示 */
+        }
+
+        .modal-subtitle {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #F8FAFC;
+            text-align: left; /* 副標題文字靠左對齊 */
+        }
+
+        /* Disabled state for tab buttons */
+        .modal-tab-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #4A5568 !important; /* Override hover effect */
+        }
+
+        /* 自訂圖片集模態框樣式 */
+        #customAlbumModal .modal-content {
+            max-width: 500px; /* Adjust width for URL input */
+            margin-left: auto; /* Center it for input */
+            margin-right: auto;
+            text-align: center;
+        }
+        /* Style for the file input */
+        #customAlbumFileInput {
+            display: block; /* Make it a block element */
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid rgba(248, 250, 252, 0.3);
+            background: rgba(0, 0, 0, 0.2);
+            color: #F8FAFC;
+            font-size: 0.9rem;
+            margin-bottom: 15px; /* Add some space below */
+        }
+        #customAlbumFileInput::-webkit-file-upload-button {
+            background: #165DFF;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        #customAlbumFileInput::-webkit-file-upload-button:hover {
+            background: #0D4EDF;
+        }
+
+        #customAlbumModal button {
+            margin-top: 15px;
+            padding: 10px 25px;
+            border-radius: 5px;
+            background: #165DFF;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        #customAlbumModal button:hover {
+            background: #0D4EDF;
+        }
+
+        /* 載入更多按鈕樣式 */
+        #loadMoreBtn {
+            display: none; /* 預設隱藏 */
+            margin: 20px auto;
+            padding: 12px 25px;
+            border-radius: 25px;
+            background: #FF7D00;
+            color: white;
+            border: none;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(255, 125, 0, 0.3);
+        }
+        #loadMoreBtn:hover {
+            background: #E06C00;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(255, 125, 0, 0.5);
+        }
+
+        /* 語音控制按鈕樣式 */
+        .speech-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            justify-content: flex-start; /* Align buttons to the left */
+        }
+
+        .speech-btn {
+            padding: 8px 15px;
+            border-radius: 5px;
+            background: #28A745; /* Green for play */
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .speech-btn:hover {
+            background: #218838;
+        }
+
+        .speech-btn.stop {
+            background: #DC3545; /* Red for stop */
+        }
+
+        .speech-btn.stop:hover {
+            background: #C82333;
+        }
+
+        .speech-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: #6C757D !important; /* Grey when disabled */
+        }
+
+
+        /* 針對行動裝置的響應式調整 */
+        @media (max-width: 768px) {
+            .gallery-container {
+                height: 400px;
+            }
+            
+            .nav-btn {
+                width: 40px;
+                height: 40px;
+            }
+            
+            .nav-btn.prev {
+                left: 5%;
+            }
+            
+            .nav-btn.next {
+                right: 5%;
+            }
+            
+            .category-nav {
+                gap: 10px;
+                padding: 0 10px;
+            }
+            
+            .category-btn {
+                padding: 8px 15px;
+                font-size: 0.9rem;
+            }
+            
+            .category-btn i {
+                font-size: 1rem;
+            }
+
+            .api-key-section {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .modal-content {
+                margin-left: 2.5vw; /* Adjust for smaller screens */
+                margin-right: 2.5vw;
+                width: 95%; /* Take more width on smaller screens */
+            }
+            #customAlbumModal .modal-content {
+                width: calc(100% - 5vw); /* Adjust for custom album modal on mobile */
+            }
+        }
+    </style>
+</head>
+<body class="font-inter">
+    <header class="py-6 px-4 md:px-8">
+        <div class="max-w-7xl mx-auto">
+            <h1 class="text-[clamp(1.8rem,4vw,3rem)] font-bold text-center text-white drop-shadow-lg">創意3D畫廊</h1>
+            <p class="text-center text-gray-300 mt-2 max-w-2xl mx-auto">探索這個使用Three.js創建的沉浸式畫廊，體驗獨特的3D視覺效果</p>
+            
+            <div class="api-key-section max-w-2xl mx-auto">
+                <input type="text" id="geminiApiKeyInput" placeholder="在此輸入您的 Gemini API 金鑰">
+                <button id="saveApiKeyBtn">設定 API 金鑰</button>
+                <button id="clearApiKeyBtn">API 金鑰消除</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-12">
+        <div class="category-nav animate-fade-in" style="animation-delay: 0.3s">
+            <button class="category-btn category-active" data-category="nature">
+                <i class="fa-solid fa-tree"></i> 自然風光
+            </button>
+            <button class="category-btn" data-category="architecture">
+                <i class="fa-solid fa-building"></i> 建築設計
+            </button>
+            <button class="category-btn" data-category="people">
+                <i class="fa-solid fa-users"></i> 人物肖像
+            </button>
+            <button class="category-btn" data-category="animals">
+                <i class="fa-solid fa-paw"></i> 動物世界
+            </button>
+            <button class="category-btn" data-category="abstract">
+                <i class="fa-solid fa-circle-half-stroke"></i> 抽象藝術
+            </button>
+            <button class="category-btn" data-category="food">
+                <i class="fa-solid fa-utensils"></i> 美食攝影
+            </button>
+            <button class="category-btn" data-category="city">
+                <i class="fa-solid fa-city"></i> 城市景觀
+            </button>
+            <button class="category-btn" data-category="travel">
+                <i class="fa-solid fa-plane"></i> 旅行紀實
+            </button>
+            <button class="category-btn" data-category="night">
+                <i class="fa-solid fa-moon"></i> 夜景攝影
+            </button>
+            <button class="category-btn" data-category="macro">
+                <i class="fa-solid fa-magnifying-glass-plus"></i> 微距攝影
+            </button>
+            <button class="category-btn" data-category="custom_album">
+                <i class="fa-solid fa-folder-open"></i> 自訂圖片集
+            </button>
+            
+            <button class="category-btn" data-category="pexels_photos"> <i class="fa-solid fa-images"></i> Pexels 圖片庫
+            </button>
+            <button class="category-btn" data-category="pixabay_photos"> <i class="fa-solid fa-camera"></i> Pixabay 圖片庫
+            </button>
+            <button class="category-btn" data-category="instructions"> <i class="fa-solid fa-circle-info"></i> 操作說明
+            </button>
+        </div>
+
+        <div class="max-w-xl mx-auto mt-8 p-4 bg-dark/50 rounded-lg shadow-lg flex items-center justify-center space-x-4">
+            <label for="imageSizeSlider" class="text-gray-300 font-semibold text-lg">圖片大小：</label>
+            <input type="range" id="imageSizeSlider" min="150" max="450" value="300" step="10" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer range-lg">
+            <span id="currentImageSize" class="text-white text-lg font-bold">300</span>
+        </div>
+
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loader"></div>
+        </div>
+
+        <div class="gallery-container">
+            <div id="three-container"></div>
+            
+            <button id="prevBtn" class="nav-btn prev animate-fade-in" style="animation-delay: 0.2s">
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <button id="nextBtn" class="nav-btn next animate-fade-in" style="animation-delay: 0.4s">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+        
+        <div class="gallery-indicators" id="indicators">
+            </div>
+        
+        <button id="loadMoreBtn" class="hidden">載入更多</button>
+
+        <div class="gallery-info animate-fade-in" style="animation-delay: 1.5s">
+            <h2 class="gallery-title" id="categoryTitle">自然風光</h2>
+            <p class="gallery-desc" id="categoryDesc">
+                欣賞大自然的壯麗景色，包括山脈、森林、湖泊、海洋等令人驚嘆的自然景觀。每張照片都捕捉到了大自然的美麗瞬間。
+            </p>
+        </div>
+    </main>
+
+    <footer class="py-8 bg-dark/50 mt-12">
+        <div class="max-w-7xl mx-auto px-4 text-center text-gray-400">
+            <p>© 2025 創意3D畫廊 | 使用HTML、CSS和JavaScript構建</p>
+            <div class="mt-4 flex justify-center gap-4">
+                <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                    <i class="fa-brands fa-github"></i>
+                </a>
+                <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                    <i class="fa-brands fa-twitter"></i>
+                </a>
+                <a href="#" class="text-gray-400 hover:text-primary transition-colors">
+                    <i class="fa-brands fa-instagram"></i>
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <div id="storyModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close-btn" id="closeModalBtn">&times;</button>
+            <h3 class="modal-title" id="modalMainTitle">圖片故事與問答</h3>
+            
+            <div id="modalTabsContainer" class="flex justify-start gap-4 mb-4">
+                <button id="storyTabBtn" class="px-4 py-2 rounded-md bg-primary hover:bg-blue-700 text-white transition-colors modal-tab-btn">圖片故事</button>
+                <button id="qaTabBtn" class="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-700 text-white transition-colors modal-tab-btn">圖片問答</button>
+            </div>
+
+            <div id="storyContentArea" class="modal-section active">
+                <h4 class="modal-subtitle" id="modalStoryTitle"></h4>
+                <p class="modal-story" id="modalStoryContent"></p>
+                <div class="speech-controls">
+                    <button id="playStoryBtn" class="speech-btn" disabled><i class="fa-solid fa-play"></i> 播放語音</button>
+                    <button id="stopStoryBtn" class="speech-btn stop" disabled><i class="fa-solid fa-stop"></i> 停止語音</button>
+                </div>
+                <div id="modalLoadingStory" class="loader mx-auto mt-4" style="display: none;"></div>
+            </div>
+
+            <div id="qaContentArea" class="modal-section">
+                <h4 class="modal-subtitle mb-2">針對圖片提問：</h4>
+                <textarea id="questionInput" class="w-full p-2 rounded-md bg-gray-700 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary mb-3" rows="3" placeholder="請輸入您的問題..."></textarea>
+                <button id="askQuestionBtn" class="w-full p-2 rounded-md bg-primary hover:bg-blue-700 text-white transition-colors">提問</button>
+                <div class="speech-controls">
+                    <button id="playQaBtn" class="speech-btn" disabled><i class="fa-solid fa-play"></i> 播放語音</button>
+                    <button id="stopQaBtn" class="speech-btn stop" disabled><i class="fa-solid fa-stop"></i> 停止語音</button>
+                </div>
+                <div id="qaLoading" class="loader mx-auto mt-4" style="display: none;"></div>
+                <div id="answerOutput" class="modal-story mt-4 border-t border-gray-700 pt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="customAlbumModal" class="modal">
+        <div class="modal-content">
+            <button class="modal-close-btn" id="closeCustomAlbumModalBtn">&times;</button>
+            <h3 class="modal-title">載入自訂圖片集</h3>
+            <p class="text-gray-300 mb-4">請點擊下方按鈕選擇一個資料夾，程式將從中載入圖片。</p>
+            <input type="file" id="customAlbumFileInput" webkitdirectory directory multiple accept="image/*">
+            <button id="triggerCustomAlbumLoadBtn" style="display: none;">選擇資料夾</button> 
+        </div>
+    </div>
+
+    <script type="module">
+        // Import GoogleGenerativeAI library
+        import { GoogleGenerativeAI } from 'https://esm.run/@google/generative-ai';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // User-provided Gemini API key
+            let userGeminiApiKey = localStorage.getItem('geminiApiKey') || ""; // Load from localStorage (if available)
+
+            // Get API key input elements
+            const geminiApiKeyInput = document.getElementById('geminiApiKeyInput');
+            const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
+            const clearApiKeyBtn = document.getElementById('clearApiKeyBtn'); 
+
+            // Set initial value of the input field
+            geminiApiKeyInput.value = userGeminiApiKey;
+            // If there's a key, display it as password by default
+            if (userGeminiApiKey) {
+                geminiApiKeyInput.type = "password";
+            }
+
+            // When input field gains focus, change its type to text
+            geminiApiKeyInput.addEventListener('focus', () => {
+                geminiApiKeyInput.type = "text";
+            });
+
+            // When input field loses focus and has content, change its type back to password
+            geminiApiKeyInput.addEventListener('blur', () => {
+                if (geminiApiKeyInput.value.trim() !== '') {
+                    geminiApiKeyInput.type = "password";
+                }
+            });
+
+            // Modal elements and QA related elements
+            const storyModal = document.getElementById('storyModal');
+            const closeModalBtn = document.getElementById('closeModalBtn');
+            const modalMainTitle = document.getElementById('modalMainTitle'); // Reference to the main modal title
+            const modalStoryTitle = document.getElementById('modalStoryTitle');
+            const modalStoryContent = document.getElementById('modalStoryContent');
+            const modalLoadingStory = document.getElementById('modalLoadingStory');
+            const storyTabBtn = document.getElementById('storyTabBtn');
+            const qaTabBtn = document.getElementById('qaTabBtn');
+            const modalTabsContainer = document.getElementById('modalTabsContainer'); // New reference for tabs container
+            const storyContentArea = document.getElementById('storyContentArea');
+            const qaContentArea = document.getElementById('qaContentArea');
+            const questionInput = document.getElementById('questionInput');
+            const askQuestionBtn = document.getElementById('askQuestionBtn');
+            const answerOutput = document.getElementById('answerOutput');
+            const qaLoading = document.getElementById('qaLoading');
+
+            // Speech Synthesis elements
+            const playStoryBtn = document.getElementById('playStoryBtn');
+            const stopStoryBtn = document.getElementById('stopStoryBtn');
+            const playQaBtn = document.getElementById('playQaBtn');
+            const stopQaBtn = document.getElementById('stopQaBtn');
+
+            // Custom Album Modal elements
+            const customAlbumModal = document.getElementById('customAlbumModal');
+            const closeCustomAlbumModalBtn = document.getElementById('closeCustomAlbumModalBtn');
+            const customAlbumFileInput = document.getElementById('customAlbumFileInput'); // Changed from textarea
+            const triggerCustomAlbumLoadBtn = document.getElementById('triggerCustomAlbumLoadBtn'); // This button is now hidden, file input handles it
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+
+            // Global state variables for carousel rotation and modal status
+            let isModalOpen = false;      // True if the story/QA modal or custom album modal is currently open
+            let isCarouselRunning = true; // True if carousel is actively rotating
+            let autoPlayInterval;
+
+            // Custom Album Data
+            let customAlbumFiles = []; // Stores File objects from local selection
+            let customAlbumCurrentIndex = 0;
+            const imagesPerLoad = 8; // Number of images to load at a time
+
+            // Pexels Photos Data
+            let pexelsPage = 1; // Current page for Pexels Photos API
+            const PEXELS_API_KEY = 'a2KqrmtTjdy9mOsjzr9fRT4VsnJSN05ZMAyRdpl5FAobVsJXCHPZlGYD'; 
+
+            // Pixabay Photos Data
+            let pixabayPage = 1; // Current page for Pixabay Photos API
+            const PIXABAY_API_KEY = '50793363-f31895e6fdc87c4f4ed175bcc'; 
+
+            // Speech Synthesis state
+            let currentSpeechUtterance = null;
+            let isSpeaking = false;
+
+            // Define the full instructions markdown as a string in JavaScript
+            const fullInstructionsMarkdown = `## 創意3D畫廊操作說明
+
+歡迎使用創意3D畫廊！這個應用程式讓您可以瀏覽不同類型的圖片，並利用 Gemini AI 為圖片生成故事或進行問答。以下是詳細的操作步驟：
+
+### 一、API 金鑰設定
+
+為了啟用圖片故事和問答功能，您需要設定 Gemini API 金鑰。此外，Pexels 圖片庫功能也需要 Pexels API 金鑰。
+
+1. **設定 Gemini API 金鑰：**
+
+   * 在頁面頂部的「在此輸入您的 Gemini API 金鑰」輸入框中，貼上您的 Gemini API 金鑰。
+
+   * 點擊「設定 API 金鑰」按鈕。
+
+   * 系統會彈出一個提示框，告知您金鑰已成功儲存。
+
+   * 如果您想移除金鑰，點擊「API 金鑰消除」按鈕即可。
+
+2. **設定 Pexels API 金鑰：**
+
+   * Pexels API 金鑰已直接寫入程式碼中。您可以在程式碼的 \`const PEXELS_API_KEY = 'a2KqrmtTjdy9mOsjzr9fRT4VsnJSN05ZMAyRdpl5FAobVsJXCHPZlGYD';\` 這一行找到並確認。
+
+   * **重要提示**：如果您想使用自己的 Pexels API 金鑰，或遇到 Pexels 圖片載入問題，請前往 [Pexels Developers 網站](https://www.pexels.com/api/) 獲取您的金鑰，並將程式碼中的 \`'a2KqrmtTjdy9mOsjzr9fRT4VsnJSN05ZMAyRdpl5FAobVsJXCHPZlGYD'\` 替換為您的實際金鑰。
+
+### 二、瀏覽畫廊
+
+1. **旋轉畫廊：**
+
+   * 您可以點擊畫廊左右兩側的 **\`<\` (上一個)** 和 **\`>\` (下一個)** 按鈕來手動旋轉圖片。
+
+   * 您也可以直接用滑鼠拖曳圖片，或在觸控螢幕上滑動，來自由旋轉畫廊。
+
+   * 畫廊會自動每 5 秒旋轉一次。將滑鼠移到畫廊上會暫停自動旋轉，移開後會恢復。
+
+2. **圖片指示器：**
+
+   * 畫廊下方有一排圓點指示器，每個圓點代表畫廊中的一張圖片。
+
+   * 點擊任一圓點，畫廊會自動旋轉到該圓點所代表的圖片位置。
+
+### 三、選擇圖片分類
+
+頁面中間有一排分類按鈕，您可以點擊這些按鈕來切換不同的圖片類別：
+
+* **自然風光**：欣賞大自然的壯麗景色。
+
+* **建築設計**：探索世界各地的建築傑作。
+
+* **人物肖像**：捕捉人物的獨特表情和故事。
+
+* **動物世界**：探索地球上迷人的動物。
+
+* **抽象藝術**：欣賞富有創意的抽象藝術作品。
+
+* **美食攝影**：探索世界各地的美食文化。
+
+* **城市景觀**：捕捉城市的活力與魅力。
+
+* **旅行紀實**：體驗不同文化的獨特魅力。
+
+* **夜景攝影**：欣賞夜幕降臨後的美景。
+
+* **微距攝影**：探索微小世界的奇妙細節。
+
+* **自訂圖片集**：
+
+  * 點擊此按鈕會彈出一個模態框，您可以點擊「選擇資料夾」按鈕，從您的電腦中選擇一個包含圖片的資料夾。
+
+  * 應用程式會載入該資料夾中的圖片，並在畫廊中顯示。
+
+  * 每次載入 8 張圖片，如果資料夾中還有更多圖片，會出現「載入更多」按鈕。
+
+* **Pexels 圖片庫**：
+
+  * 首次載入會從 Pexels API 隨機獲取 8 張策展圖片。
+  * 點擊「載入更多」會依序載入下一批 8 張圖片。
+  * **請確保您的 Pexels API 金鑰已正確設定在程式碼中，否則此功能將無法正常運作。**
+
+* **Pixabay 圖片庫**：
+  * 首次載入會從 Pixabay API 隨機獲取 8 張圖片。
+  * 點擊「載入更多」會依序載入下一批 8 張圖片。
+  * **請確保您的 Pixabay API 金鑰已正確設定在程式碼中，否則此功能將無法正常運作。**
+
+### 四、圖片互動（故事與問答）
+
+1. **開啟互動模態框：**
+
+   * 點擊畫廊中的任何一張圖片，會彈出一個互動模態框。
+
+   * 如果您的 Gemini API 金鑰未設定，模態框會提示您設定金鑰。
+
+   * 如果金鑰已設定，模態框會自動為您點擊的圖片生成一個簡短的故事。
+
+2. **圖片故事：**
+
+   * 模態框預設顯示「圖片故事」分頁。
+
+   * 您可以點擊「播放語音」按鈕來聽取故事的語音朗讀。
+
+   * 點擊「停止語音」按鈕可以停止朗讀。
+
+3. **圖片問答：**
+
+   * 點擊模態框中的「圖片問答」分頁。
+
+   * 在「請輸入您的問題...」文字框中輸入您想對圖片提出的問題。
+
+   * 點擊「提問」按鈕，Gemini AI 將嘗試根據圖片內容回答您的問題。
+
+   * 答案會顯示在下方的輸出區域。
+
+   * 同樣，您可以點擊「播放語音」和「停止語音」按鈕來控制答案的語音朗讀。
+
+### 五、載入更多圖片
+
+對於「自訂圖片集」、「Pexels 圖片庫」和「Pixabay 圖片庫」這三個類別，如果當前顯示的圖片數量少於總數，畫廊下方會出現一個「載入更多」按鈕。點擊此按鈕可以載入該類別的下一批圖片，使您的照片瀏覽體驗更加豐富。
+
+希望這些說明能幫助您更好地體驗創意3D畫廊！如果您有任何其他問題，請隨時提出。
+`;
+
+            // Section to remove from the instructions when displayed in the modal
+            // Removed the Pexels API key section from the instructions displayed in the modal
+            const pexelsSectionToRemove = `2. **設定 Pexels API 金鑰：**
+
+   * Pexels API 金鑰已直接寫入程式碼中。您可以在程式碼的 \`const PEXELS_API_KEY = 'a2KqrmtTjdy9mOsjzr9fRT4VsnJSN05ZMAyRdpl5FAobVsJXCHPZlGYD';\` 這一行找到並確認。
+
+   * **重要提示**：如果您想使用自己的 Pexels API 金鑰，或遇到 Pexels 圖片載入問題，請前往 [Pexels Developers 網站](https://www.pexels.com/api/) 獲取您的金鑰，並將程式碼中的 \`'a2KqrmtTjdy9mOsjzr9fRT4VsnJSN05ZMAyRdpl5FAobVsJXCHPZlGYD'\` 替換為您的實際金鑰。`;
+
+
+            // Function to enable/disable tab buttons (visual change for opacity/cursor)
+            function setTabButtonsEnabled(enabled) {
+                storyTabBtn.disabled = !enabled;
+                qaTabBtn.disabled = !enabled;
+                if (enabled) {
+                    storyTabBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    qaTabBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                } else {
+                    storyTabBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    qaTabBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
+
+            // Function to show/hide tab buttons and QA content (structural change using display property)
+            function setInteractiveFeaturesVisibility(visible) {
+                if (visible) {
+                    modalTabsContainer.style.display = 'flex'; // Show tab buttons
+                    qaContentArea.style.display = 'block';     // Show QA section
+                    modalStoryTitle.style.display = 'block';   // Show story subtitle
+                } else {
+                    modalTabsContainer.style.display = 'none'; // Hide tab buttons
+                    qaContentArea.style.display = 'none';     // Hide QA section
+                    modalStoryTitle.style.display = 'none';   // Hide story subtitle
+                }
+            }
+
+            // Function to update speech control button states
+            function updateSpeechButtons(playEnabled, stopEnabled) {
+                playStoryBtn.disabled = !playEnabled;
+                stopStoryBtn.disabled = !stopEnabled;
+                playQaBtn.disabled = !playEnabled;
+                stopQaBtn.disabled = !stopEnabled;
+            }
+
+            // Function to speak text
+            function speakText(text, lang = 'zh-TW') {
+                if (!('speechSynthesis' in window)) {
+                    console.warn('您的瀏覽器不支持語音合成 API。');
+                    return;
+                }
+
+                stopSpeaking(); // Stop any ongoing speech before starting new one
+
+                currentSpeechUtterance = new SpeechSynthesisUtterance(text);
+                currentSpeechUtterance.lang = lang;
+
+                currentSpeechUtterance.onstart = () => {
+                    isSpeaking = true;
+                    updateSpeechButtons(false, true); // Disable play, enable stop
+                };
+                currentSpeechUtterance.onend = () => {
+                    isSpeaking = false;
+                    updateSpeechButtons(true, false); // Enable play, disable stop
+                    currentSpeechUtterance = null;
+                };
+                currentSpeechUtterance.onerror = (event) => {
+                    console.error('語音合成錯誤:', event.error);
+                    isSpeaking = false;
+                    updateSpeechButtons(true, false); // Enable play, disable stop
+                    currentSpeechUtterance = null;
+                };
+
+                speechSynthesis.speak(currentSpeechUtterance);
+            }
+
+            // Function to stop speaking
+            function stopSpeaking() {
+                if ('speechSynthesis' in window && speechSynthesis.speaking) {
+                    speechSynthesis.cancel();
+                }
+                isSpeaking = false;
+                updateSpeechButtons(true, false); // Enable play, disable stop
+                currentSpeechUtterance = null;
+            }
+
+            // Event listener for saving API key
+            saveApiKeyBtn.addEventListener('click', () => {
+                userGeminiApiKey = geminiApiKeyInput.value.trim();
+                storyModal.classList.add('active'); // Show modal
+                isModalOpen = true; // Set modal state
+
+                // Reset modal content and visibility for API key messages
+                setInteractiveFeaturesVisibility(false); // Hide interactive features
+                modalLoadingStory.style.display = 'none';
+                qaLoading.style.display = 'none';
+                answerOutput.textContent = '';
+                questionInput.value = '';
+                showTab('story'); // Ensure story tab is active for messages
+                stopSpeaking(); // Stop any speech when modal opens for API key message
+                updateSpeechButtons(false, false); // Disable speech buttons for API key message
+
+                if (userGeminiApiKey === "") {
+                    localStorage.removeItem('geminiApiKey');
+                    modalMainTitle.textContent = "提示";
+                    modalStoryContent.textContent = "API 金鑰已消除。要使用相關功能需重新設定。。";
+                    geminiApiKeyInput.type = "text"; // Display as text after clearing
+                } else {
+                    localStorage.setItem('geminiApiKey', userGeminiApiKey); // Save to localStorage
+                    modalMainTitle.textContent = "提示";
+                    modalStoryContent.textContent = "您的 Gemini API 金鑰已成功儲存。現在您可以點擊圖片來生成故事與圖片問答。";
+                    geminiApiKeyInput.type = "password"; // Display as password after setting
+                }
+                initializeGeminiModel(); // Re-initialize model after saving key
+
+                // Auto-close the modal after 3 seconds for API key messages
+                setTimeout(() => {
+                    storyModal.classList.remove('active');
+                    isModalOpen = false;
+                }, 3000);
+            });
+
+            // Event listener for clearing API key
+            clearApiKeyBtn.addEventListener('click', () => {
+                userGeminiApiKey = ""; // Clear the variable
+                localStorage.removeItem('geminiApiKey'); // Remove key from localStorage
+                geminiApiKeyInput.value = ""; // Clear the input field
+                geminiApiKeyInput.type = "text"; // Display as text after clearing
+                
+                storyModal.classList.add('active'); // Show modal
+                isModalOpen = true; // Set modal state
+
+                // Reset modal content and visibility for API key messages
+                setInteractiveFeaturesVisibility(false); // Hide interactive features
+                modalLoadingStory.style.display = 'none';
+                qaLoading.style.display = 'none';
+                answerOutput.textContent = '';
+                questionInput.value = '';
+                showTab('story'); // Ensure story tab is active for messages
+                stopSpeaking(); // Stop any speech when modal opens for API key message
+                updateSpeechButtons(false, false); // Disable speech buttons for API key message
+
+                modalMainTitle.textContent = "提示";
+                modalStoryContent.textContent = "API 金鑰已消除。要使用相關功能需重新設定。";
+                initializeGeminiModel(); // Re-initialize model after clearing key
+
+                // Auto-close the modal after 3 seconds for API key messages
+                setTimeout(() => {
+                    storyModal.classList.remove('active');
+                    isModalOpen = false;
+                }, 3000);
+            });
+
+
+            // Initialize Generative AI model (will re-initialize if API key changes)
+            let genAI = null; // Initialize as null
+            let model = null; // Initialize as null
+
+            function initializeGeminiModel() {
+                if (userGeminiApiKey) {
+                    genAI = new GoogleGenerativeAI(userGeminiApiKey);
+                    model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); 
+                } else {
+                    genAI = null;
+                    model = null; // Ensure they are reset if no key
+                }
+            }
+
+            initializeGeminiModel(); // Initialize on load
+
+            // Define photo data for different categories
+            const photoCategories = {
+                nature: {
+                    title: "自然風光",
+                    description: "欣賞大自然的壯麗景色，包括山脈、森林、湖泊、海洋等令人驚嘆的自然景觀。每張照片都捕捉到了大自然的美麗瞬間。",
+                    query: "nature"
+                },
+                architecture: {
+                    title: "建築設計",
+                    description: "探索世界各地的建築傑作，從古老的歷史建築到現代的標誌性地標，每張照片都展示了人類創造力的巔峰。",
+                    query: "architecture"
+                },
+                people: {
+                    title: "人物肖像",
+                    description: "捕捉世界各地人物的獨特表情和故事，每張肖像都展現了人類多樣性和個體魅力。",
+                    query: "people"
+                },
+                animals: {
+                    title: "動物世界",
+                    description: "探索地球上最迷人的動物，從野生叢林到海洋深處，每張照片都展示了動物王國的奇妙之處。",
+                    query: "animals"
+                },
+                abstract: {
+                    title: "抽象藝術",
+                    description: "透過色彩、形狀和構圖表達深刻的情感和思想。",
+                    query: "abstract"
+                },
+                food: {
+                    title: "美食攝影",
+                    description: "探索世界各地的美食文化，從精緻的高級料理到道地的街頭小吃，每張照片都喚起您的味蕾體驗。",
+                    query: "food"
+                },
+                city: {
+                    title: "城市景觀",
+                    description: "透過鏡頭捕捉城市的活力與魅力，從繁忙的都市街道到寧靜的巷弄角落，每張照片都講述著城市的故事。",
+                    query: "city"
+                },
+                travel: {
+                    title: "旅行紀實",
+                    description: "跟隨攝影師的腳步探索世界各地的風土人情，每張照片都帶您體驗不同文化的獨特魅力。",
+                    query: "travel"
+                },
+                night: {
+                    title: "夜景攝影",
+                    description: "欣賞夜幕降臨後的城市與自然之美，從燈火輝煌的都市天際線到繁星點點的夜空，每張照片都展現夜晚的神秘魅力。",
+                    query: "night"
+                },
+                macro: {
+                    title: "微距攝影",
+                    description: "探索微小世界的奇妙細節，從昆蟲的翅膀到花朵的結構，每張照片都揭示了肉眼難以察覺的精緻之美。",
+                    query: "macro"
+                },
+                custom_album: { // Placeholder for custom album, photos will be dynamically loaded
+                    title: "自訂圖片集",
+                    description: "您載入的自訂圖片集，每次顯示 8 張，可點擊「載入更多」查看下一批。",
+                    photos: [] // This will be populated dynamically
+                },
+                pexels_photos: { // New category for Pexels photos
+                    title: "Pexels 圖片庫",
+                    description: "從 Pexels API 隨機獲取的圖片，每次載入 8 張，可點擊「載入更多」查看下一批。",
+                    photos: [] // This will be populated dynamically
+                },
+                pixabay_photos: { // New category for Pixabay photos
+                    title: "Pixabay 圖片庫",
+                    description: "從 Pixabay API 隨機獲取的圖片，每次載入 8 張，可點擊「載入更多」查看下一批。",
+                    photos: [] // This will be populated dynamically
+                }
+            };
+
+            const threeContainer = document.getElementById('three-container'); // Three.js 渲染容器
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            const indicators = document.getElementById('indicators');
+            const categoryTitle = document.getElementById('categoryTitle');
+            const categoryDesc = document.getElementById('categoryDesc');
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const categoryBtns = document.querySelectorAll('.category-btn');
+            
+            // Image size slider elements
+            const imageSizeSlider = document.getElementById('imageSizeSlider');
+            const currentImageSizeSpan = document.getElementById('currentImageSize');
+
+            let currentImageForQA = null; // Stores current image info for QA function
+            
+            let currentCategory = 'nature';
+            // Current image display width, initially set to the slider's default value
+            let imageDisplayWidth = parseInt(imageSizeSlider.value); 
+            // Previous image display width, for detecting changes
+            let previousImageDisplayWidth = imageDisplayWidth;
+
+            const padding = 50; // 圖片間的額外間距，增加以確保間距
+            
+            // Three.js 相關變數
+            let scene, camera, renderer, light;
+            let meshes = []; // 儲存所有的圖片網格
+            let textureLoader = new THREE.TextureLoader();
+            let currentActiveMeshIndex = 0; // 當前活動圖片的索引
+            let isDragging = false;
+            let previousMouseX = 0;
+            let cameraRotationSpeed = 0.005; // 攝影機旋轉速度
+            let targetCameraRotationY = 0; // 目標攝影機 Y 軸旋轉角度
+            let currentDisplayedPhotos = []; // Stores the photos currently rendered in Three.js
+
+            // Function: Switch tabs in the modal
+            function showTab(tabName) {
+                // Ensure only story content area is visible by default for API messages
+                if (tabName === 'story') {
+                    storyContentArea.style.display = 'block';
+                    qaContentArea.style.display = 'none';
+                    storyTabBtn.classList.add('bg-primary', 'hover:bg-blue-700');
+                    storyTabBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                    qaTabBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+                    qaTabBtn.classList.remove('bg-primary', 'hover:bg-blue-700');
+                } else if (tabName === 'qa') {
+                    storyContentArea.style.display = 'none';
+                    qaContentArea.style.display = 'block';
+                    qaTabBtn.classList.add('bg-primary', 'hover:bg-blue-700');
+                    qaTabBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                    storyTabBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+                    storyTabBtn.classList.remove('bg-primary', 'hover:bg-blue-700');
+                    // When switching to QA tab, clear previous answer and input
+                    answerOutput.textContent = '';
+                    questionInput.value = '';
+                }
+                stopSpeaking(); // Stop any speech when switching tabs
+                updateSpeechButtons(false, false); // Disable speech buttons until content is ready
+            }
+
+            // Tab button event listeners
+            storyTabBtn.addEventListener('click', () => showTab('story'));
+            qaTabBtn.addEventListener('click', () => showTab('qa'));
+
+            // Three.js 場景初始化
+            function initThreeScene() {
+                // 場景
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x0a0a0a); // 深色背景
+
+                // 攝影機
+                camera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1000);
+                // 攝影機位置將在 rebuildGalleryMeshes 中動態調整
+
+                // 渲染器
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+                threeContainer.appendChild(renderer.domElement);
+
+                // 環境光
+                const ambientLight = new THREE.AmbientLight(0x404040); // 柔和的環境光
+                scene.add(ambientLight);
+
+                // 點光源 (中間的光源)
+                light = new THREE.PointLight(0xffffff, 1, 0); // 顏色，強度，距離 (0 = 無限遠)
+                light.position.set(0, 0, 0); // 放置在中心
+                scene.add(light);
+
+                // 響應式調整
+                window.addEventListener('resize', onWindowResize, false);
+            }
+
+            function onWindowResize() {
+                camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+                // Call rebuildGalleryMeshes to re-position camera if needed
+                rebuildGalleryMeshes(imageDisplayWidth);
+            }
+
+            // 渲染迴圈
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // 平滑旋轉攝影機 (用戶拖曳時)
+                camera.rotation.y += (targetCameraRotationY - camera.rotation.y) * 0.1;
+                
+                // 自動旋轉場景 (整個環形) - 僅在 isCarouselRunning 為 true 時執行
+                if (isCarouselRunning) {
+                    scene.rotation.y += 0.003; 
+                }
+
+                renderer.render(scene, camera);
+            }
+
+            // 圖片點擊事件處理
+            function onImageClick(event) {
+                // 點擊 Three.js 容器時，停止自動播放
+                clearInterval(autoPlayInterval);
+                isCarouselRunning = false; // 設置為暫停狀態
+
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+
+                // 計算鼠標在 Three.js 容器中的相對位置
+                const bounds = threeContainer.getBoundingClientRect();
+                mouse.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+                mouse.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+
+                const intersects = raycaster.intersectObjects(meshes, true);
+
+                if (intersects.length > 0) {
+                    const intersectedMesh = intersects[0].object;
+                    const photo = intersectedMesh.userData.photoData; // 取得綁定的圖片資料
+                    
+                    // 無論 API 金鑰是否存在，都打開模態框並嘗試生成故事/提示設定金鑰
+                    isModalOpen = true; 
+                    generateStoryForImage(photo.isLocalFile ? photo.fileObject : photo.src, photo.alt, photo.isLocalFile);
+                }
+            }
+            threeContainer.addEventListener('click', onImageClick); // Ensure click listener is added
+
+            // 初始化畫廊
+            function initGallery() {
+                initThreeScene(); // 初始化 Three.js 場景
+                // Initial load using the current imageDisplayWidth
+                loadCategoryPhotos(currentCategory); 
+                setupCategoryButtons();
+                setupNavigation();
+                setupDragThreeJS(); // 設置 Three.js 拖曳
+                setupAutoPlayThreeJS(); // 設置 Three.js 自動旋轉
+                setupModalEvents(); // Set up modal events
+                setupCustomAlbumModalEvents(); // Set up custom album modal events
+                setupImageSizeSlider(); // Setup image size slider
+                updateSpeechButtons(false, false); // Initialize speech buttons as disabled
+            }
+            
+            // Function to fetch random images from Pexels Photos
+            async function fetchPexelsPhotos(page, limit = 8) {
+                if (!PEXELS_API_KEY || PEXELS_API_KEY === 'YOUR_PEXELS_API_KEY') {
+                    console.error("Pexels API Key is not set. Please replace 'YOUR_PEXELS_API_KEY' with your actual key from https://www.pexels.com/api/");
+                    return [];
+                }
+                try {
+                    const response = await fetch(`https://api.pexels.com/v1/curated?page=${page}&per_page=${limit}`, {
+                        headers: {
+                            Authorization: PEXELS_API_KEY
+                        }
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    return data.photos.map(item => ({
+                        id: item.id,
+                        src: item.src.large2x, // Use a high-quality source
+                        alt: item.alt || `Pexels Photo by ${item.photographer}`
+                    }));
+                } catch (error) {
+                    console.error("Error fetching Pexels photos:", error);
+                    return [];
+                }
+            }
+
+            // Function to fetch random images from Pixabay Photos
+            async function fetchPixabayPhotos(query, page, limit = 8) {
+                if (!PIXABAY_API_KEY) {
+                    console.error("Pixabay API Key is not set.");
+                    return [];
+                }
+                try {
+                    const response = await fetch(`https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&orientation=vertical&page=${page}&per_page=${limit}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    return data.hits.map(item => ({
+                        id: item.id,
+                        src: item.webformatURL, // Use webformatURL for display
+                        alt: item.tags
+                    }));
+                } catch (error) {
+                    console.error("Error fetching Pixabay photos:", error);
+                    return [];
+                }
+            }
+
+            // Rebuilds all meshes in the scene with the current imageDisplayWidth
+            async function rebuildGalleryMeshes(width) {
+                // Clear existing meshes
+                meshes.forEach(mesh => scene.remove(mesh));
+                meshes = [];
+                indicators.innerHTML = ''; // Clear indicators
+
+                if (currentDisplayedPhotos.length === 0) {
+                    showLoading(false);
+                    return;
+                }
+
+                // Recalculate dynamicRadius based on new imageDisplayWidth
+                // Ensure dynamicRadius is large enough to prevent images from overlapping horizontally.
+                // Each image has width + padding. The circumference must be at least this much.
+                const minCircumference = currentDisplayedPhotos.length * (width + padding);
+                const dynamicRadius = Math.max(350, minCircumference / (2 * Math.PI)); 
+
+                // Calculate the half vertical field of view in radians
+                const halfFovRad = THREE.MathUtils.degToRad(camera.fov / 2);
+                
+                // Calculate the half horizontal field of view in radians
+                const horizontalHalfFovRad = Math.atan(Math.tan(halfFovRad) * camera.aspect);
+
+                // Calculate the effective maximum horizontal span of the carousel
+                // This includes the diameter of the circle and the width of the image itself on either side
+                const carouselVisualDiameter = (dynamicRadius * 2) + (width * 1.2); // Adding 20% extra width buffer for images
+
+                // Calculate the required camera Z position to fit the entire carousel horizontally
+                // The formula is: distance = (half_width_of_object) / tan(half_horizontal_fov)
+                camera.position.z = (carouselVisualDiameter / 2) / Math.tan(horizontalHalfFovRad);
+                camera.updateProjectionMatrix();
+
+                const angleStep = (2 * Math.PI) / currentDisplayedPhotos.length;
+                const texturePromises = [];
+
+                currentDisplayedPhotos.forEach((photo, index) => {
+                    const promise = new Promise((resolve) => {
+                        textureLoader.load(photo.src, 
+                            function (texture) {
+                                const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                                // Calculate height based on aspect ratio
+                                const aspectRatio = texture.image.width / texture.image.height;
+                                const height = width / aspectRatio;
+                                const geometry = new THREE.PlaneGeometry(width, height); 
+                                const mesh = new THREE.Mesh(geometry, material);
+                                mesh.userData.photoData = photo;
+
+                                const angle = index * angleStep;
+                                mesh.position.x = dynamicRadius * Math.sin(angle);
+                                mesh.position.z = dynamicRadius * Math.cos(angle);
+                                mesh.lookAt(0, 0, 0); // Make image face the center
+
+                                scene.add(mesh);
+                                meshes.push(mesh);
+                                resolve();
+                            },
+                            undefined, // onProgress callback
+                            function (err) {
+                                console.error('An error happened loading texture for:', photo.src, err);
+                                // Fallback to placeholder on error
+                                const placeholderTexture = textureLoader.load('https://placehold.co/600x800/FF0000/FFFFFF?text=Image+Load+Failed'); // Using a fixed 600x800 for consistency
+                                const placeholderMaterial = new THREE.MeshBasicMaterial({ map: placeholderTexture, side: THREE.DoubleSide });
+                                
+                                // Calculate height for placeholder based on fixed aspect ratio (600/800 = 0.75)
+                                const placeholderAspectRatio = 600 / 800; // Fixed aspect ratio for placeholder
+                                const height = width / placeholderAspectRatio;
+                                const geometry = new THREE.PlaneGeometry(width, height); 
+                                const mesh = new THREE.Mesh(geometry, placeholderMaterial);
+
+                                const angle = index * angleStep;
+                                mesh.position.x = dynamicRadius * Math.sin(angle);
+                                mesh.position.z = dynamicRadius * Math.cos(angle);
+                                mesh.lookAt(0, 0, 0);
+
+                                mesh.userData.photoData = photo;
+                                scene.add(mesh);
+                                meshes.push(mesh);
+                                resolve();
+                            }
+                        );
+                    });
+                    texturePromises.push(promise);
+
+                    // Create indicators
+                    const indicator = document.createElement('div');
+                    indicator.className = `indicator ${index === 0 ? 'active' : ''} animate-fade-in`;
+                    indicator.style.animationDelay = `${0.6 + (index * 0.1)}s`;
+                    indicator.addEventListener('click', () => {
+                        rotateCarouselToPhoto(index);
+                    });
+                    indicators.appendChild(indicator);
+                });
+
+                Promise.all(texturePromises).then(() => {
+                    showLoading(false);
+                    setupAutoPlayThreeJS();
+                    updateIndicators();
+                    renderer.render(scene, camera); // Explicit render
+                    console.log(`Loaded ${meshes.length} images into the scene with width: ${width}.`);
+                });
+            }
+
+            // Load category photos
+            async function loadCategoryPhotos(category, append = false) {
+                showLoading(true);
+                
+                let photosToFetch = [];
+                let categoryData = photoCategories[category];
+
+                // Determine initial state based on 'append' parameter
+                if (!append) {
+                    // For a new category load, reset everything
+                    meshes.forEach(mesh => scene.remove(mesh));
+                    meshes = [];
+                    indicators.innerHTML = '';
+                    currentDisplayedPhotos = []; // Start with an empty array for new category
+                    // Reset page counters for external APIs
+                    if (category === 'pexels_photos') pexelsPage = 1;
+                    if (category === 'pixabay_photos') pixabayPage = 1;
+                    if (category === 'custom_album') customAlbumCurrentIndex = 0;
+                } else {
+                    // If appending, clear existing displayed photos to show only the new batch
+                    currentDisplayedPhotos = [];
+                }
+
+                loadMoreBtn.style.display = 'none'; // Hide load more by default
+
+                // Fetch photos based on category
+                if (category === 'custom_album') {
+                    if (customAlbumFiles.length === 0 && !append) {
+                        categoryTitle.textContent = "自訂圖片集";
+                        categoryDesc.textContent = "請點擊「自訂圖片集」按鈕選擇一個資料夾載入您的圖片。";
+                        showLoading(false);
+                        return;
+                    }
+                    const startIndex = customAlbumCurrentIndex;
+                    const endIndex = Math.min(customAlbumFiles.length, startIndex + imagesPerLoad);
+                    photosToFetch = customAlbumFiles.slice(startIndex, endIndex).map(file => ({
+                        id: file.name,
+                        src: URL.createObjectURL(file),
+                        alt: file.name,
+                        isLocalFile: true,
+                        fileObject: file
+                    }));
+                    customAlbumCurrentIndex = endIndex; // Update index for next load
+                    if (customAlbumCurrentIndex < customAlbumFiles.length) {
+                        loadMoreBtn.style.display = 'block';
+                    }
+                } else if (category === 'pexels_photos') {
+                    if (!PEXELS_API_KEY || PEXELS_API_KEY === 'YOUR_PEXELS_API_KEY') {
+                        categoryTitle.textContent = "Pexels 圖片庫";
+                        categoryDesc.textContent = "Pexels API 金鑰未設定。請替換程式碼中的 'YOUR_PEXELS_API_KEY' 為您的實際金鑰，可從 https://www.pexels.com/api/ 獲取。";
+                        showLoading(false);
+                        return;
+                    }
+                    photosToFetch = await fetchPexelsPhotos(pexelsPage, imagesPerLoad);
+                    if (photosToFetch.length > 0) {
+                        pexelsPage++; // Increment page for next load
+                        if (photosToFetch.length === imagesPerLoad) { // Only show if a full batch is returned
+                            loadMoreBtn.style.display = 'block';
+                        }
+                    } else if (currentDisplayedPhotos.length === 0) { // Only display message if no photos are loaded at all
+                         categoryTitle.textContent = "Pexels 圖片庫";
+                         categoryDesc.textContent = "無法載入 Pexels 圖片，請檢查您的 API 金鑰是否有效，或稍後再試。";
+                         showLoading(false);
+                         return;
+                    }
+                } else if (category === 'pixabay_photos') {
+                    if (!PIXABAY_API_KEY) {
+                        categoryTitle.textContent = "Pixabay 圖片庫";
+                        categoryDesc.textContent = "Pixabay API 金鑰未設定。";
+                        showLoading(false);
+                        return;
+                    }
+                    const query = categoryData.query || "popular";
+                    photosToFetch = await fetchPixabayPhotos(query, pixabayPage, imagesPerLoad);
+                    if (photosToFetch.length > 0) {
+                        pixabayPage++; // Increment page for next load
+                        if (photosToFetch.length === imagesPerLoad) { // Only show if a full batch is returned
+                            loadMoreBtn.style.display = 'block';
+                        }
+                    } else if (currentDisplayedPhotos.length === 0) { // Only display message if no photos are loaded at all
+                        categoryTitle.textContent = "Pixabay 圖片庫";
+                        categoryDesc.textContent = "無法載入 Pixabay 圖片，請檢查您的 API 金鑰或稍後再試。";
+                        showLoading(false);
+                        return;
+                    }
+                } else {
+                    // For predefined categories (nature, architecture, etc.)
+                    // These always fetch from Pixabay on page 1, and don't support "Load More"
+                    if (!PIXABAY_API_KEY) {
+                        categoryTitle.textContent = categoryData.title;
+                        categoryDesc.textContent = "Pixabay API 金鑰未設定，無法載入此類別圖片。";
+                        showLoading(false);
+                        return;
+                    }
+                    const query = categoryData.query;
+                    photosToFetch = await fetchPixabayPhotos(query, 1, 8); // Always fetch page 1, 8 images
+                    loadMoreBtn.style.display = 'none'; // No "Load More" for these
+                }
+
+                // Update currentDisplayedPhotos by concatenating new photos
+                currentDisplayedPhotos = currentDisplayedPhotos.concat(photosToFetch);
+                
+                if (currentDisplayedPhotos.length === 0) {
+                    showLoading(false);
+                    return;
+                }
+                
+                // Update category title and description
+                categoryTitle.textContent = categoryData.title;
+                categoryDesc.textContent = categoryData.description;
+
+                // Rebuild gallery with all current photos
+                rebuildGalleryMeshes(imageDisplayWidth);
+            }
+            
+            // Set up category buttons
+            function setupCategoryButtons() {
+                categoryBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const category = btn.getAttribute('data-category');
+                        
+                        // Update current category
+                        currentCategory = category;
+                        
+                        // Update button styles
+                        categoryBtns.forEach(b => b.classList.remove('category-active'));
+                        btn.classList.add('category-active');
+                        
+                        if (category === 'custom_album') {
+                            customAlbumModal.classList.add('active');
+                            isModalOpen = true;
+                            // 暫停自動旋轉
+                            clearInterval(autoPlayInterval);
+                            isCarouselRunning = false;
+                            // Reset file input value to allow selecting the same folder again
+                            customAlbumFileInput.value = ''; 
+                        } else if (category === 'instructions') {
+                            displayInstructionsModal();
+                        }
+                        else {
+                            // Always load category photos when the button is clicked
+                            loadCategoryPhotos(category);
+                        }
+                    });
+                });
+            }
+            
+            // Set up navigation buttons
+            function setupNavigation() {
+                prevBtn.addEventListener('click', () => {
+                    rotateCarouselByStep(1); // 順時針旋轉
+                    setupAutoPlayThreeJS(); // 重新啟動自動播放並重置計時器
+                }); 
+                nextBtn.addEventListener('click', () => {
+                    rotateCarouselByStep(-1); // 逆時針旋轉
+                    setupAutoPlayThreeJS(); // 重新啟動自動播放並重置計時器
+                });
+            }
+            
+            // Three.js 拖曳功能
+            function setupDragThreeJS() {
+                let startMouseX = 0;
+                let startRotationY = 0;
+
+                threeContainer.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    startMouseX = e.clientX;
+                    startRotationY = targetCameraRotationY;
+                    threeContainer.style.cursor = 'grabbing';
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+                    const deltaX = e.clientX - startMouseX;
+                    targetCameraRotationY = startRotationY + deltaX * cameraRotationSpeed;
+                });
+
+                window.addEventListener('mouseup', () => {
+                    isDragging = false;
+                    threeContainer.style.cursor = 'grab';
+                });
+
+                threeContainer.addEventListener('touchstart', (e) => {
+                    isDragging = true;
+                    startMouseX = e.touches[0].clientX;
+                    startRotationY = targetCameraRotationY;
+                }, { passive: true });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (!isDragging) return;
+                    const deltaX = e.touches[0].clientX - startMouseX;
+                    targetCameraRotationY = startRotationY + deltaX * cameraRotationSpeed;
+                }, { passive: true });
+
+                window.addEventListener('touchend', () => {
+                    isDragging = false;
+                });
+            }
+            
+            // Three.js 自動播放
+            function setupAutoPlayThreeJS() {
+                clearInterval(autoPlayInterval); // 清除現有的自動播放
+                isCarouselRunning = true; // 設定為自動播放狀態
+                autoPlayInterval = setInterval(() => {
+                    rotateCarouselByStep(-1); // 逆時針旋轉
+                }, 5000); // 每 5 秒自動旋轉
+
+                // 鼠標懸停時暫停自動播放
+                threeContainer.addEventListener('mouseenter', () => {
+                    if (isCarouselRunning) {
+                        clearInterval(autoPlayInterval);
+                    }
+                });
+                
+                // 鼠標移開時恢復自動播放
+                threeContainer.addEventListener('mouseleave', () => {
+                    if (isCarouselRunning && !isModalOpen) { // 僅在自動播放且模態框未打開時恢復
+                        setupAutoPlayThreeJS(); // 呼叫此函數重新啟動自動播放
+                    }
+                });
+            }
+            
+            // 更新指標 (針對 Three.js 場景)
+            function updateIndicators() {
+                if (meshes.length === 0) return;
+
+                // 計算當前攝影機的 Y 軸旋轉角度
+                const currentCameraRotationY = camera.rotation.y;
+
+                // 計算每個圖片網格在圓周上的理想角度
+                const angleStep = (2 * Math.PI) / meshes.length;
+
+                let closestIndex = 0;
+                let minAngleDiff = Infinity;
+
+                for (let i = 0; i < meshes.length; i++) {
+                    const mesh = meshes[i];
+                    // 獲取圖片網格當前相對於中心的角度
+                    const meshAngle = Math.atan2(mesh.position.x, mesh.position.z);
+                    
+                    // 考慮到攝影機的旋轉，計算圖片與攝影機正對方向的角度差
+                    let angleDiff = meshAngle - currentCameraRotationY;
+
+                    // 將角度差正規化到 -PI 到 PI 之間
+                    angleDiff = (angleDiff + Math.PI) % (2 * Math.PI) - Math.PI;
+
+                    // 取絕對值以找到最近的圖片
+                    if (Math.abs(angleDiff) < minAngleDiff) {
+                        minAngleDiff = Math.abs(angleDiff);
+                        closestIndex = i;
+                    }
+                }
+
+                Array.from(indicators.children).forEach((indicator, index) => {
+                    if (index === closestIndex) {
+                        indicator.classList.add('active');
+                    } else {
+                        indicator.classList.remove('active');
+                    }
+                });
+            }
+            
+            // 根據步長旋轉 Three.js 場景
+            function rotateCarouselByStep(step) {
+                if (meshes.length === 0) return;
+                
+                // 計算每個圖片所需的角度步長
+                const anglePerImage = (2 * Math.PI) / meshes.length;
+                targetCameraRotationY += step * anglePerImage;
+                updateIndicators();
+            }
+
+            // 旋轉 Three.js 場景到指定圖片
+            function rotateCarouselToPhoto(index) {
+                if (meshes.length === 0 || index < 0 || index >= meshes.length) return;
+
+                // 計算目標圖片的當前角度
+                const targetMesh = meshes[index];
+                const targetAngle = Math.atan2(targetMesh.position.x, targetMesh.position.z);
+
+                // 設定攝影機的目標旋轉角度，使攝影機正對目標圖片
+                // 攝影機需要旋轉到與圖片相同的角度，以確保圖片在視野中心
+                targetCameraRotationY = targetAngle;
+                updateIndicators();
+            }
+            
+            // Show/hide loading animation
+            function showLoading(show) {
+                if (show) {
+                    loadingOverlay.classList.add('active');
+                } else {
+                    loadingOverlay.classList.remove('active');
+                }
+            }
+
+            // Set up modal events for story/QA modal
+            function setupModalEvents() {
+                closeModalBtn.addEventListener('click', () => {
+                    storyModal.classList.remove('active');
+                    // When closing modal, clear QA input and output
+                    questionInput.value = '';
+                    answerOutput.textContent = '';
+                    isModalOpen = false; // Modal is now closed
+                    stopSpeaking(); // Stop any speech when modal closes
+                    setupAutoPlayThreeJS(); // Resume auto-play when modal closes
+                });
+
+                storyModal.addEventListener('click', (e) => {
+                    if (e.target === storyModal) {
+                        storyModal.classList.remove('active');
+                        // When closing modal, clear QA input and output
+                        questionInput.value = '';
+                        answerOutput.textContent = '';
+                        isModalOpen = false; // Modal is now closed
+                        stopSpeaking(); // Stop any speech when modal closes
+                        setupAutoPlayThreeJS(); // Resume auto-play when modal closes
+                    }
+                });
+
+                // Speech control button event listeners
+                playStoryBtn.addEventListener('click', () => {
+                    if (modalStoryContent.textContent) {
+                        speakText(modalStoryContent.textContent);
+                    }
+                });
+                stopStoryBtn.addEventListener('click', stopSpeaking);
+
+                playQaBtn.addEventListener('click', () => {
+                    if (answerOutput.textContent) {
+                        speakText(answerOutput.textContent);
+                    }
+                });
+                stopQaBtn.addEventListener('click', stopSpeaking);
+            }
+
+            // Set up events for custom album modal
+            function setupCustomAlbumModalEvents() {
+                closeCustomAlbumModalBtn.addEventListener('click', () => {
+                    customAlbumModal.classList.remove('active');
+                    isModalOpen = false; // Custom album modal is now closed
+                    setupAutoPlayThreeJS(); // Resume auto-play when custom album modal closes
+                });
+
+                // Handle folder selection when files are chosen
+                customAlbumFileInput.addEventListener('change', (event) => {
+                    const files = event.target.files;
+                    if (files.length > 0) {
+                        // Filter for image files
+                        customAlbumFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+                        customAlbumCurrentIndex = 0; // Reset index for new album
+                        loadCategoryPhotos('custom_album'); // Load first batch
+                        customAlbumModal.classList.remove('active');
+                        isModalOpen = false;
+                    } else {
+                        // Using a custom message box instead of alert()
+                        const messageBox = document.createElement('div');
+                        messageBox.style.cssText = `
+                            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                            background: #333; color: white; padding: 20px; border-radius: 10px;
+                            box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 1000;
+                            text-align: center;
+                        `;
+                        messageBox.innerHTML = `
+                            <p>沒有選擇任何圖片檔案！</p>
+                            <button style="margin-top: 10px; padding: 8px 15px; background: #165DFF; color: white; border: none; border-radius: 5px; cursor: pointer;">確定</button>
+                        `;
+                        document.body.appendChild(messageBox);
+                        messageBox.querySelector('button').addEventListener('click', () => {
+                            document.body.removeChild(messageBox);
+                        });
+                    }
+                });
+
+                loadMoreBtn.addEventListener('click', () => {
+                    if (currentCategory === 'custom_album' || currentCategory === 'pexels_photos' || currentCategory === 'pixabay_photos') {
+                        loadCategoryPhotos(currentCategory, true); // Append more custom/pexels/pixabay images
+                    }
+                });
+            }
+
+            // Set up image size slider
+            function setupImageSizeSlider() {
+                imageSizeSlider.addEventListener('input', () => {
+                    imageDisplayWidth = parseInt(imageSizeSlider.value);
+                    currentImageSizeSpan.textContent = imageDisplayWidth;
+                    // Only rebuild if the size actually changed to avoid unnecessary re-renders
+                    if (imageDisplayWidth !== previousImageDisplayWidth) {
+                        rebuildGalleryMeshes(imageDisplayWidth);
+                        previousImageDisplayWidth = imageDisplayWidth;
+                    }
+                });
+            }
+
+            // Helper function: Convert image URL to Base64
+            async function urlToBase64(url) {
+                try {
+                    const response = await fetch(url);
+                    // Check if response is successful (status code 200)
+                    if (!response.ok) {
+                        throw new Error(`HTTP Error! Status: ${response.status}, URL: ${url}`);
+                    }
+                    const blob = await response.blob();
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result.split(',')[1]); // Get Base64 string without "data:image/jpeg;base64," prefix
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
+                }
+                catch (error) {
+                    console.error("Error converting image to Base64:", error);
+                    // Use a placeholder image or show an error message
+                    const placeholderImageUrl = 'https://placehold.co/600x800/FF0000/FFFFFF?text=Image+Load+Failed';
+                    const placeholderResponse = await fetch(placeholderImageUrl);
+                    const placeholderBlob = await placeholderResponse.blob();
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(placeholderBlob);
+                    });
+                }
+            }
+
+            // Helper function: Convert File object to Base64
+            async function fileToBase64(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        if (reader.result) {
+                            resolve(reader.result.split(',')[1]); // Get Base64 string without prefix
+                        } else {
+                            reject(new Error("FileReader result is null."));
+                        }
+                    };
+                    reader.onerror = (error) => reject(error);
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            // Function: Generate story for image using Gemini API
+            async function generateStoryForImage(imageSource, imageAlt, isLocalFile = false) {
+                currentImageForQA = { source: imageSource, alt: imageAlt, isLocalFile: isLocalFile }; // Store source and type
+                storyModal.classList.add('active'); // Show modal
+                stopSpeaking(); // Stop any ongoing speech
+                updateSpeechButtons(false, false); // Disable speech buttons during loading
+
+                setInteractiveFeaturesVisibility(false); // Hide interactive features temporarily
+                modalStoryTitle.style.display = 'block'; 
+                modalStoryContent.textContent = '';
+                modalLoadingStory.style.display = 'none';
+                qaLoading.style.display = 'none';
+                answerOutput.textContent = '';
+                questionInput.value = '';
+                showTab('story'); // Default to story tab
+                
+                modalMainTitle.textContent = "提示"; 
+
+                if (!userGeminiApiKey) {
+                    modalStoryContent.textContent = "API 金鑰未設定。請在主頁輸入您的 Gemini API 金鑰。";
+                    return; // No API key, exit
+                }
+
+                // If API key is present, enable interactive features and proceed
+                setInteractiveFeaturesVisibility(true); 
+                setTabButtonsEnabled(true); 
+                modalMainTitle.textContent = "圖片故事與問答"; 
+                modalStoryTitle.textContent = `正在為 "${imageAlt}" 生成故事...`;
+                modalLoadingStory.style.display = 'block';
+
+                try {
+                    let base64Image;
+                    let mimeType;
+
+                    if (isLocalFile) {
+                        base64Image = await fileToBase64(imageSource); // imageSource is a File object
+                        mimeType = imageSource.type; // Get MIME type from File object
+                    } else {
+                        base64Image = await urlToBase64(imageSource); // imageSource is a URL string
+                        // Attempt to infer MIME type from URL or default to jpeg
+                        mimeType = imageSource.endsWith('.png') ? 'image/png' : 'image/jpeg';
+                    }
+
+                    const prompt = `請為這張圖片生成一個大約100字以內的富有想像力的簡短故事或描述。內容應圍繞著圖片本身，風格可以是抒情、奇幻或富有哲理，請避免生成過於暴力或不適宜的內容。如果圖片無法識別，請回應'無法為這張圖片生成故事。'`;
+
+                    const result = await model.generateContent([
+                        prompt,
+                        {
+                            inlineData: {
+                                mimeType: mimeType, 
+                                data: base64Image
+                            }
+                        }
+                    ]);
+
+                    const response = await result.response;
+                    let text = response.text();
+
+                    const safetyRatings = response.promptFeedback?.safetyRatings || [];
+                    const blockedReason = response.promptFeedback?.blockReason;
+
+                    if (blockedReason) {
+                        text = `內容被阻止。原因: ${blockedReason}。部分內容可能觸發了以下安全設定:\n${safetyRatings.map(rating => `${rating.category}: ${rating.probability}`).join('\n')}`;} else if (text.trim() === '') {
+                        text = "無法為這張圖片生成故事，請稍後再試。";
+                    }
+
+                    modalStoryTitle.textContent = `"${imageAlt}" 的故事`;
+                    modalStoryContent.textContent = text;
+                    updateSpeechButtons(true, false); 
+                } catch (error) {
+                    console.error("生成故事時出錯:", error);
+                    modalStoryTitle.textContent = `"${imageAlt}" 的故事`;
+                    modalStoryContent.textContent = "抱歉，生成故事時發生錯誤。請檢查您的 API 金鑰是否有效，或稍後再試。";
+                    updateSpeechButtons(false, false); 
+                } finally {
+                    modalLoadingStory.style.display = 'none';
+                }
+            }
+
+            // Function: Answer image-related questions using Gemini API
+            askQuestionBtn.addEventListener('click', async () => {
+                const questionText = questionInput.value.trim();
+                if (!questionText) {
+                    answerOutput.textContent = "請輸入您的問題。";
+                    updateSpeechButtons(false, false); 
+                    return;
+                }
+                if (!currentImageForQA) {
+                    answerOutput.textContent = "沒有選中要提問的圖片。請先點擊畫廊中的一張圖片。";
+                    updateSpeechButtons(false, false); 
+                    return;
+                }
+                if (!userGeminiApiKey) { 
+                    answerOutput.textContent = "API 金鑰未設定。請在主頁輸入您的 Gemini API 金鑰。";
+                    updateSpeechButtons(false, false); 
+                    return;
+                }
+
+                answerOutput.textContent = ''; 
+                qaLoading.style.display = 'block'; 
+                stopSpeaking(); 
+                updateSpeechButtons(false, false); 
+
+                initializeGeminiModel(); 
+
+                if (!model) { 
+                    answerOutput.textContent = "無法初始化 Gemini 模型。請檢查您的 API 金鑰是否有效。";
+                    qaLoading.style.display = 'none';
+                    updateSpeechButtons(false, false); 
+                    return;
+                }
+
+                try {
+                    let base64Image;
+                    let mimeType;
+
+                    if (currentImageForQA.isLocalFile) {
+                        base64Image = await fileToBase64(currentImageForQA.source);
+                        mimeType = currentImageForQA.source.type;
+                    } else {
+                        base64Image = await urlToBase64(currentImageForQA.source);
+                        mimeType = currentImageForQA.source.endsWith('.png') ? 'image/png' : 'image/jpeg';
+                    }
+
+                    const prompt = `針對這張圖片，回答以下問題：「${questionText}」。請用大約100字以內簡潔地回答。如果圖片無法識別或問題與圖片無關，請回應「無法針對此圖片回答此問題。」`;
+
+                    const result = await model.generateContent([
+                        prompt,
+                        {
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Image
+                            }
+                        }
+                    ]);
+
+                    const response = await result.response;
+                    let text = response.text();
+
+                    const safetyRatings = response.promptFeedback?.safetyRatings || [];
+                    const blockedReason = response.promptFeedback?.blockReason;
+
+                    if (blockedReason) {
+                        text = `內容被阻止。原因: ${blockedReason}。部分內容可能觸發了以下安全設定:\n${safetyRatings.map(rating => `${rating.category}: ${rating.probability}`).join('\n')}`;} else if (text.trim() === '') {
+                        text = "無法針對此圖片回答此問題，請稍後再試。";
+                    }
+
+                    answerOutput.textContent = text;
+                    updateSpeechButtons(true, false); 
+
+                } catch (error) {
+                    console.error("回答問題時出錯:", error);
+                    answerOutput.textContent = "抱歉，回答問題時發生錯誤。請檢查您的 API 金鑰是否有效，或稍後再試。";
+                    updateSpeechButtons(false, false); 
+                } finally {
+                    qaLoading.style.display = 'none'; 
+                }
+            });
+
+            // Function to display instructions in a modal
+            function displayInstructionsModal() {
+                storyModal.classList.add('active');
+                isModalOpen = true;
+                clearInterval(autoPlayInterval); // Pause carousel
+                isCarouselRunning = false;
+
+                // Hide interactive features for instructions
+                setInteractiveFeaturesVisibility(false);
+                modalLoadingStory.style.display = 'none';
+                qaLoading.style.display = 'none';
+                answerOutput.textContent = '';
+                questionInput.value = '';
+                showTab('story'); // Always show story tab for instructions
+
+                modalMainTitle.textContent = "操作說明";
+                modalStoryTitle.textContent = ""; // No specific title for instructions
+
+                // Filter out the Pexels API key section
+                let filteredInstructions = fullInstructionsMarkdown.replace(pexelsSectionToRemove, '');
+                // Also remove the external_picsum section
+                filteredInstructions = filteredInstructions.replace(/`\* \*\*外部圖片庫 \(Picsum\)\*\*：[\s\S]*?\* \*\*請確保您的 Pexels API 金鑰已正確設定在程式碼中，否則此功能將無法正常運作。`\*\*\n/g, '');
+
+
+                // Use marked.js to parse markdown and set as innerHTML
+                modalStoryContent.innerHTML = marked.parse(filteredInstructions); 
+                updateSpeechButtons(true, false); // Enable play button for instructions
+            }
+            
+            // Initialize gallery
+            window.onload = function() {
+                initGallery();
+                animate(); // Start the Three.js animation loop
+            };
+        });
+    </script>
+</body>
+</html>
